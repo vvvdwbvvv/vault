@@ -33,11 +33,20 @@ import type {
 } from "@earendil-works/pi-ai";
 import { calculateCost } from "@earendil-works/pi-ai/models";
 
-import { parseAnswer, parseUsageTokens, wireQuestion, wireState } from "./inception-decisions-format.ts";
+import { parseAnswers, parseUsageTokens, wireQuestion, wireState } from "./inception-decisions-format.ts";
 
 const BASE_URL = "https://api.inceptionlabs.ai/v1";
 const LABEL = "Inception Decisions";
 const NO_RETRY_STATUSES = [401, 402, 404, 429];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function httpStatus(error: unknown): number | undefined {
+  if (!isRecord(error) || typeof error.status !== "number") return undefined;
+  return error.status;
+}
 
 /** Map pi thinking levels to Inception's `reasoning_effort`. */
 const thinkingLevelMap = {
@@ -58,9 +67,9 @@ const cost = (input: number, output: number, cacheRead = 0) => ({
 });
 
 /** Supported input modalities for text-only chat models. */
-const TEXT_INPUT = ["text"] as ("text" | "image")[];
+const TEXT_INPUT: ("text" | "image")[] = ["text"];
 /** Supported input modalities for the image-aware Decide classifier. */
-const TEXT_IMAGE_INPUT = ["text", "image"] as ("text" | "image")[];
+const TEXT_IMAGE_INPUT: ("text" | "image")[] = ["text", "image"];
 
 /** Chat models (OpenAI-compatible completions). */
 const chatModels = [
@@ -148,10 +157,8 @@ async function postJson(
     });
 
     if (!res.ok) {
-      const err = new Error(`${LABEL} returned ${res.status}: ${await res.text()}`) as Error & {
-        status: number;
-      };
-      err.status = res.status;
+      const err = new Error(`${LABEL} returned ${res.status}: ${await res.text()}`);
+      Object.assign(err, { status: res.status });
       throw err;
     }
 
@@ -167,7 +174,7 @@ async function postJson(
     try {
       return await attempt();
     } catch (error) {
-      const status = (error as { status?: number })?.status;
+      const status = httpStatus(error);
       const retriable = status === undefined || (status >= 500 && !NO_RETRY_STATUSES.includes(status));
       if (!retriable || i >= maxRetries) throw error;
       const delay = Math.min(1000 * 2 ** i, options?.maxRetryDelayMs ?? 8000);
@@ -222,21 +229,16 @@ export async function classify(
       ),
     }, options);
 
-    if (typeof body !== "object" || body === null) {
+    if (!isRecord(body)) {
       throw new Error(`${LABEL} returned an unexpected response`);
     }
 
     // Set usage before parsing answers: a request with refused/malformed answers
     // was still billed.
-    const tokens = parseUsageTokens((body as Record<string, unknown>).usage);
+    const tokens = parseUsageTokens(body.usage);
     if (tokens) output.usage = buildUsage(model, tokens);
 
-    const answers = (body as Record<string, unknown>).answers;
-    for (const [id, question] of Object.entries(context.questions)) {
-      const answer = (answers as Record<string, Record<string, unknown>>)[id];
-      if (!answer) throw new Error(`${LABEL} did not return an answer for "${id}"`);
-      output.answers[id] = parseAnswer(id, question, answer);
-    }
+    output.answers = parseAnswers(body.answers, context);
     return output;
   } catch (error) {
     output.answers = {};

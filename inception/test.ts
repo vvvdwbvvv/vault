@@ -129,6 +129,25 @@ run("wireState: enforces image limit", () => {
   );
 });
 
+run("parseAnswer: choice probabilities may be nested", () => {
+  const answer = parseAnswer(
+    "c",
+    { type: "choice", instructions: "", criteria: { a: "" } },
+    {
+      type: "choice",
+      choice: "a",
+      probabilities: { a: { probability: 0.5 } },
+      confidence: 0.5,
+    },
+  );
+  assert.deepEqual(answer, {
+    type: "choice",
+    choice: "a",
+    probabilities: { a: 0.5 },
+    confidence: 0.5,
+  });
+});
+
 run("parseAnswer: choice", () => {
   const answer = parseAnswer(
     "c",

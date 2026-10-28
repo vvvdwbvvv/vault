@@ -21,7 +21,18 @@ import type {
   ExtensionContext,
   ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
-import type { ClassifierModel, Model } from "@earendil-works/pi-ai";
+import type { ThinkingLevel } from "@earendil-works/pi-ai";
+
+type AutoLevel = Extract<ThinkingLevel, "low" | "medium" | "high" | "xhigh">;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function enabledFlag(data: unknown): boolean | undefined {
+  if (!isRecord(data) || !("enabled" in data)) return undefined;
+  return typeof data.enabled === "boolean" ? data.enabled : undefined;
+}
 
 const DECIDE_PROVIDER = "inception";
 const DECIDE_MODEL = "mercury-decide";
@@ -33,7 +44,7 @@ const THRESHOLDS = { low: 0.7, medium: 1.3, high: 1.7 } as const;
 /** Per-session enabled state, keyed by session id. */
 const enabledBySession = new Map<string, boolean>();
 /** Keep last judged prompt per session to avoid re-judging a retry/loop. */
-const lastSeen = new Map<string, { prompt: string; level: string }>();
+const lastSeen = new Map<string, { prompt: string; level: AutoLevel }>();
 
 function extractPromptText(prompt: string): string {
   const normalized = prompt.trim();
@@ -41,7 +52,7 @@ function extractPromptText(prompt: string): string {
   return normalized.slice(0, 4000);
 }
 
-function pickLevel(score: number): string {
+function pickLevel(score: number): AutoLevel {
   if (score < THRESHOLDS.low) return "low";
   if (score < THRESHOLDS.medium) return "medium";
   if (score < THRESHOLDS.high) return "high";
@@ -53,7 +64,7 @@ function readPersistedState(ctx: ExtensionContext): boolean | undefined {
   let value: boolean | undefined;
   for (const entry of ctx.sessionManager.getEntries()) {
     if (entry.type === "custom" && entry.customType === STATE_CUSTOM_TYPE) {
-      value = (entry.data as { enabled?: boolean } | undefined)?.enabled;
+      value = enabledFlag(entry.data);
     }
   }
   return value;
@@ -62,11 +73,11 @@ function readPersistedState(ctx: ExtensionContext): boolean | undefined {
 async function decideLevel(
   ctx: ExtensionContext,
   prompt: string,
-): Promise<string | undefined> {
+): Promise<AutoLevel | undefined> {
   const judge = ctx.modelRegistry.findOfType("classifier", DECIDE_PROVIDER, DECIDE_MODEL);
   if (!judge) return undefined;
 
-  const result = await ctx.modelRegistry.classify(judge as ClassifierModel<any>, {
+  const result = await ctx.modelRegistry.classify(judge, {
     state: { prompt },
     questions: {
       complexity: {
@@ -90,7 +101,7 @@ async function decideLevel(
   return pickLevel(answer.score);
 }
 
-function shouldHandle(model: Model<any> | undefined): model is Model<any> {
+function shouldHandle(model: ExtensionContext["model"]): model is NonNullable<ExtensionContext["model"]> {
   return !!model && model.type === "chat" && !!model.reasoning;
 }
 
@@ -114,7 +125,7 @@ export default function (pi: ExtensionAPI) {
 
     const seen = lastSeen.get(sessionId);
     if (seen && seen.prompt === prompt) {
-      pi.setThinkingLevel(seen.level as never);
+      pi.setThinkingLevel(seen.level);
       return;
     }
 
@@ -122,7 +133,7 @@ export default function (pi: ExtensionAPI) {
     if (!level) return;
 
     lastSeen.set(sessionId, { prompt, level });
-    pi.setThinkingLevel(level as never);
+    pi.setThinkingLevel(level);
   });
 
   pi.registerCommand("auto-reasoning", {

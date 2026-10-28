@@ -12,6 +12,10 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 /** A normalized subagent definition. */
 export interface AgentDef {
   name: string;
@@ -76,7 +80,9 @@ export function parseYamlLite(text: string): Record<string, unknown> {
 
     // Continuation of a `key:` block list.
     if (listKey && line.startsWith("- ")) {
-      (out[listKey] as unknown[]).push(parseScalar(line.slice(2)));
+      const list = out[listKey];
+      if (!Array.isArray(list)) throw new Error(`Expected a list for "${listKey}"`);
+      list.push(parseScalar(line.slice(2)));
       i++;
       continue;
     }
@@ -147,7 +153,7 @@ export function normalizeDef(
 
   const thinking =
     meta.thinking === "low" || meta.thinking === "medium" || meta.thinking === "high"
-      ? (meta.thinking as "low" | "medium" | "high")
+      ? meta.thinking
       : undefined;
 
   return {
@@ -172,7 +178,7 @@ export function loadDefFromFile(file: string): AgentDef {
     let json: Record<string, unknown>;
     try {
       const parsed: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
-      json = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
+      json = isRecord(parsed) ? parsed : {};
     } catch (error) {
       throw new Error(`Invalid subagent JSON "${file}": ${error instanceof Error ? error.message : String(error)}`);
     }

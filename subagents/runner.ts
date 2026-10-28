@@ -15,6 +15,7 @@ import type {
   ExtensionToolContext,
 } from "@earendil-works/pi-coding-agent";
 import type {
+  Api,
   AssistantMessage,
   Message,
   Model,
@@ -93,7 +94,7 @@ export function resolveModel(
   ctx: Pick<ExtensionToolContext, "modelRegistry" | "model">,
   def: AgentDef,
   params?: Pick<SubagentParams, "model">,
-): Model<any> | undefined {
+): Model<Api> | undefined {
   const spec = params?.model || def.model;
   if (spec && spec.includes("/")) {
     const slash = spec.indexOf("/");
@@ -144,7 +145,7 @@ function toolResultMessage(call: ToolCall, outcome: AgentToolCallOutcomeLike): T
     toolCallId: call.id,
     toolName: call.name,
     content: outcome.result.content,
-    details: outcome.result.details as never,
+    details: outcome.result.details,
     isError: outcome.isError,
     timestamp: Date.now(),
   };
@@ -152,7 +153,7 @@ function toolResultMessage(call: ToolCall, outcome: AgentToolCallOutcomeLike): T
 
 /** Minimal structural shape of `ctx.executeTool()`'s return value. */
 export interface AgentToolCallOutcomeLike {
-  result: { content: ToolResultMessage["content"]; details?: unknown };
+  result: { content: ToolResultMessage["content"]; details?: ToolResultMessage["details"] };
   isError: boolean;
 }
 
@@ -215,7 +216,7 @@ export async function runSubagent(
       assistant = await ctx.modelRegistry.complete(
         model,
         { systemPrompt, messages: transcript, tools },
-        { signal, maxTokens: Math.min(def.temperature !== undefined ? 16384 : 16384, model.maxTokens) },
+        { signal, maxTokens: Math.min(16384, model.maxTokens) },
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
