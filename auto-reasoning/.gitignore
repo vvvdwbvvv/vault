@@ -1,0 +1,3 @@
+# Dev-only symlinks so `tsc` can resolve pi type declarations.
+# pi's own module loader does NOT need these at runtime.
+node_modules/

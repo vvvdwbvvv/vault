@@ -1,0 +1,15 @@
+{
+  "name": "pi-extension-custom-provider-inception",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-strip-types test.ts",
+    "check": "node --experimental-strip-types test.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
