@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
 import { type CardAnswer, type CardOutcome, type CardQuestion, openQuestionCard } from "./dialog.ts";
 import {
 	CANCEL_TEXT,
@@ -32,9 +32,40 @@ const Params = Type.Object({
 	questions: Type.Array(QuestionSchema, { description: "At least one question." }),
 });
 
+type RawQuestion = Static<typeof QuestionSchema>;
+
 interface Details {
 	outcome: CardOutcome["kind"] | "no-operator" | "empty";
 	pairs: { question: string; answer: string }[];
+}
+
+const OUTCOMES = {
+	accepted: true,
+	chat: true,
+	skip: true,
+	cancelled: true,
+	timeout: true,
+	aborted: true,
+	"no-operator": true,
+	empty: true,
+} satisfies Record<Details["outcome"], true>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isOutcome(value: unknown): value is Details["outcome"] {
+	return typeof value === "string" && Object.hasOwn(OUTCOMES, value);
+}
+
+function readDetails(value: unknown): Details | undefined {
+	if (!isRecord(value) || !isOutcome(value.outcome) || !Array.isArray(value.pairs)) return undefined;
+	const pairs: Details["pairs"] = [];
+	for (const pair of value.pairs) {
+		if (!isRecord(pair) || typeof pair.question !== "string" || typeof pair.answer !== "string") return undefined;
+		pairs.push({ question: pair.question, answer: pair.answer });
+	}
+	return { outcome: value.outcome, pairs };
 }
 
 let planMode = process.env.PI_ASK_USER_QUESTION_MODE === "plan";
@@ -52,7 +83,7 @@ function pairsFrom(questions: CardQuestion[], answers: CardAnswer[]): { question
 	});
 }
 
-function validate(raw: { question: string; options: { label: string; description: string; preview?: string }[]; multi_select?: boolean }[]): CardQuestion[] {
+function validate(raw: readonly RawQuestion[]): CardQuestion[] {
 	const seen = new Set<string>();
 	return raw.map((q) => {
 		if (!q.question.trim()) throw new Error("Question text is empty");
@@ -76,14 +107,12 @@ function validate(raw: { question: string; options: { label: string; description
 	});
 }
 
-function modelText(questions: CardQuestion[], outcome: CardOutcome): string {
-	if (outcome.kind === "cancelled" || outcome.kind === "timeout") return unansweredText(false);
-	if (outcome.kind === "aborted") return unansweredText(false);
+function answeredRows(questions: CardQuestion[], rows: CardAnswer[]) {
 	const answers = new Map<string, string[]>();
 	const annotations = new Map<string, { preview?: string; notes?: string }>();
 	const partial = new Map<string, string>();
 	questions.forEach((q, i) => {
-		const row = outcome.answers[i];
+		const row = rows[i];
 		if (!row?.labels.length) return;
 		answers.set(q.question, row.labels);
 		partial.set(q.question, row.labels.join(", "));
@@ -94,9 +123,28 @@ function modelText(questions: CardQuestion[], outcome: CardOutcome): string {
 		}
 		if (ann.notes || ann.preview) annotations.set(q.question, ann);
 	});
-	if (outcome.kind === "chat") return formatChatAboutThis(questions, partial);
-	if (outcome.kind === "skip") return formatSkipInterview(questions, partial);
-	return formatAccepted(questions, answers, annotations);
+	return { answers, annotations, partial };
+}
+
+function modelText(questions: CardQuestion[], outcome: CardOutcome): string {
+	switch (outcome.kind) {
+		case "cancelled":
+		case "timeout":
+		case "aborted":
+			return unansweredText(false);
+		case "chat":
+			return formatChatAboutThis(questions, answeredRows(questions, outcome.answers).partial);
+		case "skip":
+			return formatSkipInterview(questions, answeredRows(questions, outcome.answers).partial);
+		case "accepted": {
+			const { answers, annotations } = answeredRows(questions, outcome.answers);
+			return formatAccepted(questions, answers, annotations);
+		}
+		default: {
+			const _exhaustive: never = outcome;
+			throw new Error(`Unexpected question outcome (${String(_exhaustive)})`);
+		}
+	}
 }
 
 async function askRpc(ctx: ExtensionContext, questions: CardQuestion[], budgetMs: number | null, signal: AbortSignal | undefined): Promise<CardOutcome> {
@@ -164,7 +212,7 @@ async function askRpc(ctx: ExtensionContext, questions: CardQuestion[], budgetMs
 export default function (pi: ExtensionAPI) {
 	pi.events.on("plan-mode", (data) => {
 		if (typeof data === "boolean") planMode = data;
-		else if (data && typeof data === "object" && "enabled" in data) planMode = Boolean((data as { enabled?: boolean }).enabled);
+		else if (isRecord(data) && "enabled" in data) planMode = Boolean(data.enabled);
 	});
 
 	pi.registerTool({
@@ -203,7 +251,8 @@ export default function (pi: ExtensionAPI) {
 			if (outcome.kind === "aborted" || signal?.aborted) {
 				throw new Error("Aborted");
 			}
-			const answers = outcome.kind === "cancelled" || outcome.kind === "timeout" ? [] : outcome.answers;
+			const answers =
+				outcome.kind === "accepted" || outcome.kind === "chat" || outcome.kind === "skip" ? outcome.answers : [];
 			return textResult(modelText(questions, outcome), {
 				outcome: outcome.kind,
 				pairs: pairsFrom(questions, answers),
@@ -214,7 +263,7 @@ export default function (pi: ExtensionAPI) {
 			return new Text(theme.fg("toolTitle", theme.bold("AskUserQuestion ")) + theme.fg("muted", `${n} question${n === 1 ? "" : "s"}`), 0, 0);
 		},
 		renderResult(result, options, theme) {
-			const details = result.details as Details | undefined;
+			const details = readDetails(result.details);
 			if (!details) {
 				const text = result.content.find((part) => part.type === "text");
 				return new Text(text && "text" in text ? text.text : "", 0, 0);

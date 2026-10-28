@@ -38,9 +38,10 @@ export default function (pi: ExtensionAPI) {
       const blocks = [...ctx.sessionManager.getBranch()].reverse().flatMap(entry => {
         if (entry.type !== "message" || entry.message.role !== "toolResult" ||
             entry.message.toolName !== "display_codeblock" || entry.message.isError) return [];
-        const details = entry.message.details as { code?: unknown; language?: unknown } | undefined;
-        if (typeof details?.code !== "string") return [];
-        return [{ code: details.code, language: typeof details.language === "string" ? details.language : "code" }];
+        const details: unknown = entry.message.details;
+        if (typeof details !== "object" || details === null || !("code" in details) || typeof details.code !== "string") return [];
+        const language = "language" in details && typeof details.language === "string" ? details.language : "code";
+        return [{ code: details.code, language }];
       });
       if (blocks.length === 0) {
         ctx.ui.notify("No displayed code on this branch.", "warning");
