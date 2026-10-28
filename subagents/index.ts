@@ -137,12 +137,7 @@ export default function (pi: ExtensionAPI) {
         throw new Error(`Unknown subagent "${params.name}". Available: ${available}`);
       }
 
-      let outcome: SubagentOutcome;
-      try {
-        outcome = await runSubagent(ctx, def, params, signal, onUpdate);
-      } catch (error) {
-        throw error;
-      }
+      const outcome: SubagentOutcome = await runSubagent(ctx, def, params, signal, onUpdate);
 
       const summary =
         `[subagent:${outcome.agent}] ${outcome.status === "max_turns" ? "reached turn cap; " : "done in "}` +
