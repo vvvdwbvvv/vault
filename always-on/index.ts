@@ -73,8 +73,8 @@ export default function alwaysOnExtension(pi: ExtensionAPI) {
     parameters: startParams,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const name = (params.name as string | undefined) || DEFAULT_WORKER_NAME;
-      const dir = params.dir as string | undefined;
+      const name = params.name || DEFAULT_WORKER_NAME;
+      const dir = params.dir;
       const { alreadyRunning, dir: actualDir, initialScreen } = await startWorker(name, dir);
       return {
         content: [
@@ -100,7 +100,7 @@ export default function alwaysOnExtension(pi: ExtensionAPI) {
     parameters: sendParams,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const { sent } = await sendText(params.name as string, params.text as string);
+      const { sent } = await sendText(params.name, params.text);
       return {
         content: [{ type: "text", text: `Sent to '${params.name}': ${sent}` }],
         details: { name: params.name, sent },
@@ -116,8 +116,8 @@ export default function alwaysOnExtension(pi: ExtensionAPI) {
     parameters: logParams,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const name = params.name as string;
-      const lines = (params.lines as number | undefined) ?? 40;
+      const name = params.name;
+      const lines = params.lines ?? 40;
       const screen = await capturePane(name, lines);
       return {
         content: [
@@ -139,7 +139,7 @@ export default function alwaysOnExtension(pi: ExtensionAPI) {
     parameters: statusParams,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const name = params.name as string | undefined;
+      const name = params.name;
       const sessions = await listSessions();
       const lines: string[] = [];
 
@@ -178,7 +178,7 @@ export default function alwaysOnExtension(pi: ExtensionAPI) {
     parameters: stopParams,
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false },
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const name = params.name as string;
+      const name = params.name;
       await stopWorker(name);
       return {
         content: [{ type: "text", text: `Stopped worker '${name}'.` }],
