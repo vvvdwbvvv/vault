@@ -10,7 +10,6 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "types": [],
-    "baseUrl": ".",
     "paths": {
       "@earendil-works/pi-coding-agent": [
         "/Users/vvvdwbvvv/.local/share/nvm/versions/node/v24.19.0/lib/node_modules/@earendil-works/pi-coding-agent/dist/index.d.ts"
