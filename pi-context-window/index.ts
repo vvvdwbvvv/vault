@@ -19,6 +19,7 @@ import { join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { applyContextWindow, parseModelsDocument } from "./models-file.ts";
 
 const PRESETS = [
 	{ key: "32k", label: "32K (32,000)", value: 32_000 },
@@ -55,55 +56,25 @@ interface ModelRef {
 	display: string;
 }
 
-interface ModelsFile {
-	providers: Record<
-		string,
-		{
-			models?: Array<{ id: string; contextWindow?: number }>;
-			modelOverrides?: Record<string, { contextWindow?: number }>;
-		}
-	>;
-}
-
-function readModelsFile(path: string): ModelsFile {
+function readModelsFile(path: string): Record<string, unknown> {
 	try {
-		const doc = JSON.parse(readFileSync(path, "utf8"));
-		if (doc && typeof doc === "object" && !Array.isArray(doc)) {
-			return doc as ModelsFile;
-		}
+		return parseModelsDocument(readFileSync(path, "utf8"));
 	} catch {
 		// 不存在或無法解析 → 重建
 	}
 	return { providers: {} };
 }
 
-function applyContextWindow(
+function persistContextWindow(
 	modelsPath: string,
 	provider: string,
 	modelId: string,
 	tokens: number,
 ): { before: number | undefined; after: number } {
 	const doc = readModelsFile(modelsPath);
-	doc.providers ??= {};
-	const prov = (doc.providers[provider] ??= {});
-
-	let before: number | undefined;
-	if (Array.isArray(prov.models)) {
-		const entry = prov.models.find((m) => m.id === modelId);
-		if (entry) {
-			before = entry.contextWindow;
-			entry.contextWindow = tokens;
-		}
-	}
-	if (before === undefined) {
-		prov.modelOverrides ??= {};
-		const override = (prov.modelOverrides[modelId] ??= {});
-		before = override.contextWindow;
-		override.contextWindow = tokens;
-	}
-
+	const result = applyContextWindow(doc, provider, modelId, tokens);
 	writeFileSync(modelsPath, JSON.stringify(doc, null, 2) + "\n");
-	return { before, after: tokens };
+	return result;
 }
 
 async function resolveTargetModel(
@@ -224,7 +195,7 @@ export default function contextWindowExtension(pi: ExtensionAPI) {
 			const activeModel = ctx.model;
 			const isCurrentModel = activeModel?.provider === model.provider && activeModel.id === model.id;
 			const modelsPath = join(getAgentDir(), "models.json");
-			const { before, after } = applyContextWindow(modelsPath, model.provider, model.id, tokens);
+			const { before, after } = persistContextWindow(modelsPath, model.provider, model.id, tokens);
 
 			const from = before === undefined ? "未設定" : formatTokens(before);
 			ctx.ui.notify(
